@@ -1,6 +1,7 @@
 from flask import Flask, request, send_from_directory, Response
 from functools import wraps
 import os
+import requests
 
 app = Flask(__name__)
 
@@ -123,6 +124,39 @@ def delete_file(filename):
     else:
         return f"{filename} not found. <a href='/files'>Back</a>", 404
 
+
+from requests.auth import HTTPBasicAuth
+
+
+@app.route("/attachment/<headerId>/<attachmentId>")
+def proxy_stream(headerId, attachmentId):
+    HACKATHON_BASEURL = os.getenv("HACKATHON_BASEURL")
+    HACKATHON_USERNAME = os.getenv("HACKATHON_USERNAME")
+    HACKATHON_PASSWORD = os.getenv("HACKATHON_PASSWORD")
+
+    target_url = (
+        f"{HACKATHON_BASEURL}/fscmRestApi/resources/11.13.18.05/"
+        f"omSalesOrders/{headerId}/child/attachments/{attachmentId}/enclosure/FileContents"
+    )
+
+    try:
+        r = requests.get(
+            target_url,
+            auth=HTTPBasicAuth(HACKATHON_USERNAME, HACKATHON_PASSWORD),
+            stream=True,
+            timeout=None
+        )
+        r.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        return {"error": str(e)}, 500
+
+    def generate():
+        for chunk in r.iter_content(chunk_size=8192):
+            if chunk:
+                yield chunk
+
+    content_type = r.headers.get("Content-Type", "application/octet-stream")
+    return Response(generate(), content_type=content_type)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
