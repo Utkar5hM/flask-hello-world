@@ -2,6 +2,9 @@ from flask import Flask, request, send_from_directory, Response
 from functools import wraps
 import os
 import requests
+import fitz
+import pymupdf4llm
+import tempfile
 
 app = Flask(__name__)
 
@@ -128,12 +131,13 @@ def delete_file(filename):
 from requests.auth import HTTPBasicAuth
 
 
+
+
 @app.route("/attachment/<headerId>/<attachmentId>")
 def proxy_stream(headerId, attachmentId):
     HACKATHON_BASEURL = os.getenv("HACKATHON_BASEURL")
     HACKATHON_USERNAME = os.getenv("HACKATHON_USERNAME")
     HACKATHON_PASSWORD = os.getenv("HACKATHON_PASSWORD")
-
     target_url = (
         f"{HACKATHON_BASEURL}/fscmRestApi/resources/11.13.18.05/"
         f"omSalesOrders/{headerId}/child/attachments/{attachmentId}/enclosure/FileContents"
@@ -149,14 +153,21 @@ def proxy_stream(headerId, attachmentId):
         r.raise_for_status()
     except requests.exceptions.RequestException as e:
         return {"error": str(e)}, 500
+    doc = fitz.open(stream=pdf, filetype="pdf")
+    all_text = ""
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
+        text = page.get_text()
+        all_text += f"\n--- Page {page_num + 1} ---\n{text}"
 
-    def generate():
-        for chunk in r.iter_content(chunk_size=8192):
-            if chunk:
-                yield chunk
+    return all_text, 200, {"Content-Type": "text/plain"}
+    # def generate():
+    #     for chunk in r.iter_content(chunk_size=8192):
+    #         if chunk:
+    #             yield chunk
 
-    content_type = r.headers.get("Content-Type", "application/octet-stream")
-    return Response(generate(), content_type=content_type)
+    # content_type = r.headers.get("Content-Type", "application/octet-stream")
+    # return Response(generate(), content_type=content_type)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
