@@ -3,7 +3,6 @@ from functools import wraps
 import os
 import requests
 import fitz
-import pymupdf4llm
 import tempfile
 
 app = Flask(__name__)
