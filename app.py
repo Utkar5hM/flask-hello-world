@@ -152,7 +152,7 @@ def proxy_stream(headerId, attachmentId):
         r.raise_for_status()
     except requests.exceptions.RequestException as e:
         return {"error": str(e)}, 500
-    doc = fitz.open(stream=pdf, filetype="pdf")
+    doc = fitz.open(stream=r.content, filetype="pdf")
     all_text = ""
     for page_num in range(len(doc)):
         page = doc.load_page(page_num)
