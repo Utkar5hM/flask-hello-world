@@ -41,95 +41,10 @@ def requires_auth(f):
     return decorated
 
 
-# Upload endpoint
-@app.route("/upload", methods=["POST"])
-@requires_auth
-def upload_file():
-    if "file" not in request.files:
-        return "No file part", 400
-    file = request.files["file"]
-    if file.filename == "":
-        return "No selected file", 400
-    filepath = os.path.join(UPLOAD_FOLDER, file.filename)
-    file.save(filepath)
-    return f"File {file.filename} uploaded successfully!"
-
-
-# Download endpoint
-@app.route("/download/<filename>", methods=["GET"])
-@requires_auth
-def download_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename, as_attachment=True)
-
-
 # Home
 @app.route("/")
 def index():
     return "PDF Upload/Download API is running!"
-
-
-# Upload form page (HTML)
-@app.route("/upload-form")
-@requires_auth
-def upload_form():
-    return """
-    <!doctype html>
-    <html>
-    <head>
-        <title>Upload PDF</title>
-    </head>
-    <body>
-        <h2>Upload a PDF</h2>
-        <form action="/upload" method="post" enctype="multipart/form-data">
-            <input type="file" name="file" accept=".pdf" required><br><br>
-            <input type="submit" value="Upload">
-        </form>
-    </body>
-    </html>
-    """
-
-
-@app.route("/files", methods=["GET"])
-@requires_auth
-def list_files():
-    files = os.listdir(UPLOAD_FOLDER)
-    list_items = ""
-    for file in files:
-        if file.endswith(".pdf"):
-            list_items += f"""
-                <li>
-                    {file}
-                    [<a href="/download/{file}" target="_blank">Download</a>]
-                    <form method="POST" action="/delete/{file}" style="display:inline;">
-                        <button type="submit" onclick="return confirm('Delete {file}?')">Delete</button>
-                    </form>
-                </li>
-            """
-    return f"""
-    <!doctype html>
-    <html>
-    <head><title>Uploaded PDFs</title></head>
-    <body>
-        <h2>Available PDFs</h2>
-        <ul>
-            {list_items if list_items else '<li>No files found.</li>'}
-        </ul>
-        <a href="/upload-form">Upload another</a>
-    </body>
-    </html>
-    """
-
-
-@app.route("/delete/<filename>", methods=["POST"])
-@requires_auth
-def delete_file(filename):
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    if os.path.exists(filepath):
-        os.remove(filepath)
-        return f"Deleted {filename}. <a href='/files'>Back</a>"
-    else:
-        return f"{filename} not found. <a href='/files'>Back</a>", 404
-
 
 from requests.auth import HTTPBasicAuth
 
@@ -158,9 +73,22 @@ def extract_clean_text_from_pdf(pdf_path):
             # Remove all style, class, and other non-semantic attributes
             for tag in soup.find_all(True):
                 tag.attrs = {}
+            # Remove empty elements including those with empty inline children
+            for p in soup.find_all("p"):
+                if not p.get_text(strip=True):
+                    p.decompose()
 
-            # Append cleaned HTML for the page
-            full_text.append(str(soup))
+            # Merge consecutive <p> tags into one, if they contain only inline text (no block tags inside)
+            # This reduces vertical gaps from multiple <p>
+            new_p_contents = []
+            for p in soup.find_all("p"):
+                text = p.get_text(separator=" ", strip=True)
+                if text:
+                    new_p_contents.append(text)
+
+            # Replace entire body with combined paragraphs joined by a single <p>
+            combined_html = "".join(f"<p>{content}</p>" for content in new_p_contents)
+            full_text.append(combined_html)
 
     return "\n".join(full_text)
 
@@ -192,13 +120,38 @@ def proxy_stream(headerId, attachmentId):
     all_text = extract_clean_text_from_pdf(r.content)
 
     return all_text, 200, {"Content-Type": "text/plain"}
-    # def generate():
-    #     for chunk in r.iter_content(chunk_size=8192):
-    #         if chunk:
-    #             yield chunk
 
-    # content_type = r.headers.get("Content-Type", "application/octet-stream")
-    # return Response(generate(), content_type=content_type)
+@app.route("/attachment/<headerId>/<orderingDocumentID>/<purchasingOrderID>")
+def bothdocs(headerId, orderingDocumentID, purchasingOrderID):
+    HACKATHON_BASEURL = os.getenv("HACKATHON_BASEURL")
+    HACKATHON_USERNAME = os.getenv("HACKATHON_USERNAME")
+    HACKATHON_PASSWORD = os.getenv("HACKATHON_PASSWORD")
+    res = {}
+    for i, docID in enumerate([orderingDocumentID, purchasingOrderID]):
+        all_text = ""
+        target_url = (
+            f"{HACKATHON_BASEURL}/fscmRestApi/resources/11.13.18.05/"
+            f"omSalesOrders/{headerId}/child/attachments/{docID}/enclosure/FileContents"
+        )
+
+        try:
+            r = requests.get(
+                target_url,
+                auth=HTTPBasicAuth(HACKATHON_USERNAME, HACKATHON_PASSWORD),
+                stream=True,
+                timeout=None
+            )
+            r.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            return {"error": str(e)}, 500
+        all_text = extract_clean_text_from_pdf(r.content)
+        if i==0:
+            res['ordering_document'] = all_text
+        else:
+            res['purchasing_order'] = all_text
+
+
+    return res, 200, {"Content-Type": "application/json"}
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
