@@ -1,9 +1,13 @@
 from flask import Flask, request, send_from_directory, Response
+from dotenv import load_dotenv
+load_dotenv() 
 from functools import wraps
 import os
 import requests
 import fitz
 import tempfile
+import dotenv
+
 
 app = Flask(__name__)
 
@@ -131,6 +135,39 @@ from requests.auth import HTTPBasicAuth
 
 
 
+from bs4 import BeautifulSoup
+
+
+def extract_clean_text_from_pdf(pdf_path):
+    """
+    Extracts HTML from PDF pages, parses it with BeautifulSoup, and returns clean text.
+    
+    Parameters:
+    - pdf_path (str): Path to the PDF file.
+    
+    Returns:
+    - str: Cleaned and concatenated text from all pages.
+    """
+    full_text = []
+
+    with fitz.open(stream=pdf_path, filetype="pdf") as doc:
+        for page in doc:
+            html = page.get_text("html")
+            soup = BeautifulSoup(html, "html.parser")
+
+            # Remove all style, class, and other non-semantic attributes
+            for tag in soup.find_all(True):
+                tag.attrs = {}
+
+            # Append cleaned HTML for the page
+            full_text.append(str(soup))
+
+    return "\n".join(full_text)
+
+# Example usage:
+# cleaned_text = extract_clean_text_from_pdf("example.pdf")
+# print(cleaned_text)
+
 
 @app.route("/attachment/<headerId>/<attachmentId>")
 def proxy_stream(headerId, attachmentId):
@@ -152,12 +189,7 @@ def proxy_stream(headerId, attachmentId):
         r.raise_for_status()
     except requests.exceptions.RequestException as e:
         return {"error": str(e)}, 500
-    doc = fitz.open(stream=r.content, filetype="pdf")
-    all_text = ""
-    for page_num in range(len(doc)):
-        page = doc.load_page(page_num)
-        text = page.get_text()
-        all_text += f"\n--- Page {page_num + 1} ---\n{text}"
+    all_text = extract_clean_text_from_pdf(r.content)
 
     return all_text, 200, {"Content-Type": "text/plain"}
     # def generate():

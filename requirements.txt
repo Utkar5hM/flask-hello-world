@@ -2,3 +2,5 @@ Flask
 Gunicorn
 requests
 pymupdf
+python-dotenv
+bs4
