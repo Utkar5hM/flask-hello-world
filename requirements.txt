@@ -3,4 +3,4 @@ Gunicorn
 requests
 pymupdf
 python-dotenv
-bs4
+beautifulsoup4
